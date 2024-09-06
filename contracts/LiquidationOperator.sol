@@ -3,10 +3,25 @@ pragma solidity ^0.8.7;
 
 import "hardhat/console.sol";
 
-// ----------------------INTERFACE------------------------------
 
-// Aave
-// https://docs.aave.com/developers/the-core-protocol/lendingpool/ilendingpool
+interface AaveProtocolDataProvider {
+
+    function getUserReserveData(address asset, address user)
+    external
+    view
+    returns (
+      uint256 currentATokenBalance,
+      uint256 currentStableDebt,
+      uint256 currentVariableDebt,
+      uint256 principalStableDebt,
+      uint256 scaledVariableDebt,
+      uint256 stableBorrowRate,
+      uint256 liquidityRate,
+      uint40 stableRateLastUpdated,
+      bool usageAsCollateralEnabled
+    );
+}
+
 
 interface ILendingPool {
     /**
@@ -135,14 +150,36 @@ interface IUniswapV2Pair {
 contract LiquidationOperator is IUniswapV2Callee {
     uint8 public constant health_factor_decimals = 18;
 
-    // TODO: define constants used in the contract including ERC-20 tokens, Uniswap Pairs, Aave lending pools, etc. */
-    //    *** Your code here ***
-    // END TODO
+    ILendingPool public aaveLendingPool = ILendingPool(0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9);
+    address public debtAsset = 0xdAC17F958D2ee523a2206206994597C13D831ec7;  // USDT
+    address public collateralAsset = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599; // WBTC
+    IUniswapV2Pair public uniswapPair_WBTC =IUniswapV2Pair(0xCEfF51756c56CeFFCA006cD410B03FFC46dd3a58) ; // sushiswap RESERVE0: WBTC reserve1 :WETH
+    IUniswapV2Pair public uniswapPair_USDT = IUniswapV2Pair(0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852) ; // uniswap RESERVE0: WETH reserve1 :USDT
+    
+    IWETH public WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    AaveProtocolDataProvider public aaveProtocolDataProvider = AaveProtocolDataProvider(0x057835Ad21a177dbdd3090bB1CAE03EaCF78Fc6d);
 
-    // some helper function, it is totally fine if you can finish the lab without using these function
-    // https://github.com/Uniswap/v2-periphery/blob/master/contracts/libraries/UniswapV2Library.sol
-    // given an input amount of an asset and pair reserves, returns the maximum output amount of the other asset
-    // safe mul is not necessary since https://docs.soliditylang.org/en/v0.8.9/080-breaking-changes.html
+
+    constructor() payable {
+    }
+
+
+    function getAmountIn(
+        uint256 amountOut,
+        uint256 reserveIn,
+        uint256 reserveOut
+    ) internal pure returns (uint256 amountIn) {
+        require(amountOut > 0, "UniswapV2Library: INSUFFICIENT_OUTPUT_AMOUNT");
+        require(
+            reserveIn > 0 && reserveOut > 0,
+            "UniswapV2Library: INSUFFICIENT_LIQUIDITY"
+        );
+        uint256 numerator = reserveIn * amountOut * 1000;
+        uint256 denominator = (reserveOut - amountOut) * 997;
+        amountIn = (numerator / denominator) + 1;
+    }
+
+
     function getAmountOut(
         uint256 amountIn,
         uint256 reserveIn,
@@ -159,78 +196,69 @@ contract LiquidationOperator is IUniswapV2Callee {
         amountOut = numerator / denominator;
     }
 
-    // some helper function, it is totally fine if you can finish the lab without using these function
-    // given an output amount of an asset and pair reserves, returns a required input amount of the other asset
-    // safe mul is not necessary since https://docs.soliditylang.org/en/v0.8.9/080-breaking-changes.html
-    function getAmountIn(
-        uint256 amountOut,
-        uint256 reserveIn,
-        uint256 reserveOut
-    ) internal pure returns (uint256 amountIn) {
-        require(amountOut > 0, "UniswapV2Library: INSUFFICIENT_OUTPUT_AMOUNT");
-        require(
-            reserveIn > 0 && reserveOut > 0,
-            "UniswapV2Library: INSUFFICIENT_LIQUIDITY"
-        );
-        uint256 numerator = reserveIn * amountOut * 1000;
-        uint256 denominator = (reserveOut - amountOut) * 997;
-        amountIn = (numerator / denominator) + 1;
-    }
 
-    constructor() {
-        // TODO: (optional) initialize your contract
-        //   *** Your code here ***
-        // END TODO
-    }
-
-    // TODO: add a `receive` function so that you can withdraw your WETH
-    //   *** Your code here ***
-    // END TODO
-
-    // required by the testing script, entry for your liquidation call
     function operate() external {
-        // TODO: implement your liquidation logic
 
-        // 0. security checks and initializing variables
-        //    *** Your code here ***
+        address user = 0x59CE4a2AC5bC3f5F225439B2993b86B42f6d3e9F;
+        (, , , , , uint256 healthFactor) = aaveLendingPool.getUserAccountData(user);
+        require(healthFactor < 10**health_factor_decimals, "Target is not liquidatable"); // Health factor below 1 means liquidatable
 
-        // 1. get the target user account data & make sure it is liquidatable
-        //    *** Your code here ***
 
-        // 2. call flash swap to liquidate the target user
-        // based on https://etherscan.io/tx/0xac7df37a43fab1b130318bbb761861b8357650db2e2c6493b73d6da3d9581077
-        // we know that the target user borrowed USDT with WBTC as collateral
-        // we should borrow USDT, liquidate the target user and get the WBTC, then swap WBTC to repay uniswap
-        // (please feel free to develop other workflows as long as they liquidate the target user successfully)
-        //    *** Your code here ***
 
-        // 3. Convert the profit into ETH and send back to sender
-        //    *** Your code here ***
+        // (,uint256 currentStableDebt,uint256 currentVariableDebt,,,,,,) = aaveProtocolDataProvider.getUserReserveData(debtAsset,user);
+        // uint amount = (currentStableDebt + currentVariableDebt) /10 ; 
+        uint amount = 2401970077573;
 
-        // END TODO
+        bytes memory data = abi.encode(msg.sender,user, amount);
+        uniswapPair_USDT.swap(0, amount, address(this), data);
+
     }
+
+    receive() external payable {
+    }
+
 
     // required by the swap
     function uniswapV2Call(
-        address,
-        uint256,
+        address sender,
+        uint256 amount0,
         uint256 amount1,
-        bytes calldata
+        bytes calldata data
     ) external override {
-        // TODO: implement your liquidation logic
 
-        // 2.0. security checks and initializing variables
-        //    *** Your code here ***
 
-        // 2.1 liquidate the target user
-        //    *** Your code here ***
 
-        // 2.2 swap WBTC for other things or repay directly
-        //    *** Your code here ***
+        require(msg.sender == address(uniswapPair_USDT), "Only uniswapPair can invoke");
+        require(sender == address(this), "Only this contract may initiate");
 
-        // 2.3 repay
-        //    *** Your code here ***
-        
-        // END TODO
+        (address initiator, address user, uint256 amount) = abi.decode(data, (address, address, uint256));
+        IERC20(debtAsset).approve(address(aaveLendingPool), amount);
+
+
+        aaveLendingPool.liquidationCall(collateralAsset, debtAsset, user, amount, false);
+        uint256 collateralAmount = IERC20(collateralAsset).balanceOf(address(this));
+
+    
+
+        IERC20(collateralAsset).transfer(address(uniswapPair_WBTC), collateralAmount); //WBTC to WETH
+
+        (uint256 uniswapPair_WBTC_reserve0,uint256 uniswapPair_WBTC_reserve1,) = uniswapPair_WBTC.getReserves();// WBTC to WETH
+        (uint256 uniswapPair_USDT_reserve0,uint256 uniswapPair_USDT_reserve1,) = uniswapPair_USDT.getReserves(); // WETH to USDT
+
+
+        uint256 amount_ETH_In = getAmountOut(collateralAmount, uniswapPair_WBTC_reserve0, uniswapPair_WBTC_reserve1); //In my account
+
+        uint256 amount_ETH_Out = getAmountIn(amount, uniswapPair_USDT_reserve0, uniswapPair_USDT_reserve1);// In the flash loan pool
+
+        uniswapPair_WBTC.swap(0, amount_ETH_In, address(this), "");
+
+        WETH.transfer(address(uniswapPair_USDT), amount_ETH_Out);
+
+
+
+        uint256 remainingCollateral = IERC20(collateralAsset).balanceOf(address(this));
+        WETH.withdraw(WETH.balanceOf(address(this)));
+        payable(initiator).transfer(address(this).balance); // Send profits back to the initiator
     }
+
 }
